@@ -695,7 +695,10 @@ export const createEntityManager = (db: Database): EntityManager => {
               .transacting(trx);
 
             const maxMap = maxResults.reduce(
-              (acc, res) => Object.assign(acc, { [res[inverseJoinColumn.name]]: res.max }),
+              (acc: Record<string, number>, res: Record<string, any>) => {
+                acc[res[inverseJoinColumn.name]] = res.max;
+                return acc;
+              },
               {} as Record<string, number>
             );
 
@@ -995,8 +998,11 @@ export const createEntityManager = (db: Database): EntityManager => {
                   .transacting(trx);
 
                 const maxMap = maxResults.reduce(
-                  (acc, res) => Object.assign(acc, { [res[inverseJoinColumn.name]]: res.max }),
-                  {}
+                  (acc: Record<string, number>, res: Record<string, any>) => {
+                    acc[res[inverseJoinColumn.name]] = res.max;
+                    return acc;
+                  },
+                  {} as Record<string, number>
                 );
 
                 insert.forEach((row) => {
@@ -1080,8 +1086,11 @@ export const createEntityManager = (db: Database): EntityManager => {
                   .transacting(trx);
 
                 const maxMap = maxResults.reduce(
-                  (acc, res) => Object.assign(acc, { [res[inverseJoinColumn.name]]: res.max }),
-                  {}
+                  (acc: Record<string, number>, res: Record<string, any>) => {
+                    acc[res[inverseJoinColumn.name]] = res.max;
+                    return acc;
+                  },
+                  {} as Record<string, number>
                 );
 
                 insert.forEach((row: any) => {

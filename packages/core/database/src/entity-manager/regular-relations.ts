@@ -276,44 +276,45 @@ const cleanOrderColumns = async ({
       return;
     }
 
-    const selectRowsToOrder = (joinTableName: string) =>
-      db
-        .connection(joinTableName)
-        .select('id')
-        .rowNumber('src_order', orderColumnName, joinColumn.name)
-        .where(joinColumn.name, id)
-        .toSQL();
-
     switch (strapi.db.dialect.client) {
       case 'mysql': {
         // Here it's MariaDB and MySQL 8
-        const select = selectRowsToOrder(joinTable.name);
+        const subquery = db
+          .getConnection()
+          .select('id')
+          .rowNumber('src_order', orderColumnName, joinColumn.name)
+          .from(joinTable.name)
+          .where(joinColumn.name, id);
 
         await db
           .getConnection()
-          .raw(
-            `UPDATE ?? as a, ( ${select.sql} ) AS b
-            SET ?? = b.src_order
-            WHERE b.id = a.id`,
-            [joinTable.name, ...select.bindings, orderColumnName]
-          )
+          .table({ a: joinTable.name })
+          .update({
+            [orderColumnName]: db.connection.ref('b.src_order'),
+          })
+          .from(subquery.as('b'))
+          .whereRaw('b.id = a.id')
           .transacting(trx);
 
         break;
       }
       default: {
         const joinTableName = addSchema(db, joinTable.name);
-        const select = selectRowsToOrder(joinTableName);
+        const subquery = db
+          .getConnection()
+          .select('id')
+          .rowNumber('src_order', inverseOrderColumnName, inverseJoinColumn.name)
+          .from(joinTableName)
+          .whereIn(inverseJoinColumn.name, inverseRelIds);
 
-        // raw query as knex doesn't allow updating from a subquery
-        await db.connection
-          .raw(
-            `UPDATE ?? as a
-            SET ?? = b.src_order
-            FROM ( ${select.sql} ) AS b
-            WHERE b.id = a.id`,
-            [joinTableName, orderColumnName, ...select.bindings]
-          )
+        await db
+          .getConnection()
+          .table({ a: joinTableName })
+          .update({
+            [inverseOrderColumnName]: db.connection.ref('b.src_order'),
+          })
+          .from(subquery.as('b'))
+          .whereRaw('b.id = a.id')
           .transacting(trx);
       }
     }
@@ -334,43 +335,44 @@ const cleanOrderColumns = async ({
   const updateInverseOrderColumn = async () => {
     if (!hasInverseOrderColumn(attribute) || isEmpty(inverseRelIds)) return;
 
-    const selectRowsToOrder = (joinTableName: string) =>
-      db
-        .connection(joinTableName)
-        .select('id')
-        .rowNumber('inv_order', inverseOrderColumnName, inverseJoinColumn.name)
-        .where(inverseJoinColumn.name, 'in', inverseRelIds)
-        .toSQL();
-
     switch (strapi.db.dialect.client) {
       case 'mysql': {
         // Here it's MariaDB and MySQL 8
-        const select = selectRowsToOrder(joinTable.name);
+        const subquery = db
+          .getConnection()
+          .select('id')
+          .rowNumber('inv_order', inverseOrderColumnName, inverseJoinColumn.name)
+          .from(joinTable.name)
+          .whereIn(inverseJoinColumn.name, inverseRelIds);
 
         await db
           .getConnection()
-          .raw(
-            `UPDATE ?? as a, ( ${select.sql} ) AS b
-            SET ?? = b.inv_order
-            WHERE b.id = a.id`,
-            [joinTable.name, ...select.bindings, inverseOrderColumnName]
-          )
+          .table({ a: joinTable.name })
+          .update({
+            [inverseOrderColumnName]: db.connection.ref('b.inv_order'),
+          })
+          .from(subquery.as('b'))
+          .whereRaw('b.id = a.id')
           .transacting(trx);
         break;
       }
       default: {
         const joinTableName = addSchema(db, joinTable.name);
-        const select = selectRowsToOrder(joinTableName);
+        const subquery = db
+          .getConnection()
+          .select('id')
+          .rowNumber('inv_order', inverseOrderColumnName, inverseJoinColumn.name)
+          .from(joinTableName)
+          .whereIn(inverseJoinColumn.name, inverseRelIds);
 
-        // raw query as knex doesn't allow updating from a subquery
-        await db.connection
-          .raw(
-            `UPDATE ?? as a
-            SET ?? = b.inv_order
-            FROM ( ${select.sql} ) AS b
-            WHERE b.id = a.id`,
-            [joinTableName, inverseOrderColumnName, ...select.bindings]
-          )
+        await db
+          .getConnection()
+          .table({ a: joinTableName })
+          .update({
+            [inverseOrderColumnName]: db.connection.ref('b.inv_order'),
+          })
+          .from(subquery.as('b'))
+          .whereRaw('b.id = a.id')
           .transacting(trx);
       }
     }

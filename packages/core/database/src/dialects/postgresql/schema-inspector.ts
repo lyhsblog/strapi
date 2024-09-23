@@ -2,10 +2,6 @@ import type { Database } from '../..';
 import type { Schema, Column, Index, ForeignKey } from '../../schema/types';
 import type { SchemaInspector } from '../dialect';
 
-interface RawTable {
-  table_name: string;
-}
-
 interface RawColumn {
   data_type: string;
   column_name: string;
@@ -21,87 +17,6 @@ interface RawIndex {
   is_unique: boolean;
   is_primary: boolean;
 }
-
-interface RawForeignKey {
-  constraint_name: string;
-}
-
-const SQL_QUERIES = {
-  TABLE_LIST: /* sql */ `
-    SELECT *
-    FROM information_schema.tables
-    WHERE
-      table_schema = ?
-      AND table_type = 'BASE TABLE'
-      AND table_name != 'geometry_columns'
-      AND table_name != 'spatial_ref_sys';
-  `,
-  LIST_COLUMNS: /* sql */ `
-    SELECT data_type, column_name, character_maximum_length, column_default, is_nullable
-    FROM information_schema.columns
-    WHERE table_schema = ? AND table_name = ?;
-  `,
-  INDEX_LIST: /* sql */ `
-    SELECT
-      ix.indexrelid,
-      i.relname as index_name,
-      a.attname as column_name,
-      ix.indisunique as is_unique,
-      ix.indisprimary as is_primary
-    FROM
-      pg_class t,
-      pg_namespace s,
-      pg_class i,
-      pg_index ix,
-      pg_attribute a
-    WHERE
-      t.oid = ix.indrelid
-      AND i.oid = ix.indexrelid
-      AND a.attrelid = t.oid
-      AND a.attnum = ANY(ix.indkey)
-      AND t.relkind = 'r'
-      AND t.relnamespace = s.oid
-      AND s.nspname = ?
-      AND t.relname = ?;
-  `,
-  FOREIGN_KEY_LIST: /* sql */ `
-    SELECT
-      tco."constraint_name" as constraint_name
-    FROM information_schema.table_constraints tco
-    WHERE
-      tco.constraint_type = 'FOREIGN KEY'
-      AND tco.constraint_schema = ?
-      AND tco.table_name = ?
-  `,
-  FOREIGN_KEY_REFERENCES: /* sql */ `
-    SELECT
-      kcu."constraint_name" as constraint_name,
-      kcu."column_name" as column_name
-
-    FROM information_schema.key_column_usage kcu
-    WHERE kcu.constraint_name=ANY(?)
-    AND kcu.table_schema = ?
-    AND kcu.table_name = ?;
-  `,
-
-  FOREIGN_KEY_REFERENCES_CONSTRAIN: /* sql */ `
-  SELECT
-  rco.update_rule as on_update,
-  rco.delete_rule as on_delete,
-  rco."unique_constraint_name" as unique_constraint_name
-  FROM information_schema.referential_constraints rco
-  WHERE rco.constraint_name=ANY(?)
-  AND rco.constraint_schema = ?
-`,
-  FOREIGN_KEY_REFERENCES_CONSTRAIN_RFERENCE: /* sql */ `
-  SELECT
-  rel_kcu."table_name" as foreign_table,
-  rel_kcu."column_name" as fk_column_name
-    FROM information_schema.key_column_usage rel_kcu
-    WHERE rel_kcu.constraint_name=?
-    AND rel_kcu.table_schema = ?
-`,
-};
 
 const toStrapiType = (column: RawColumn) => {
   const rootType = column.data_type.toLowerCase().match(/[^(), ]+/)?.[0];
@@ -165,27 +80,8 @@ export default class PostgresqlSchemaInspector implements SchemaInspector {
     this.db = db;
   }
 
-  async getSchema() {
-    const schema: Schema = { tables: [] };
-
-    const tables = await this.getTables();
-
-    schema.tables = await Promise.all(
-      tables.map(async (tableName) => {
-        const columns = await this.getColumns(tableName);
-        const indexes = await this.getIndexes(tableName);
-        const foreignKeys = await this.getForeignKeys(tableName);
-
-        return {
-          name: tableName,
-          columns,
-          indexes,
-          foreignKeys,
-        };
-      })
-    );
-
-    return schema;
+  getSchema(): Promise<Schema> {
+    throw new Error('Method not implemented.');
   }
 
   getDatabaseSchema(): string {
@@ -193,31 +89,48 @@ export default class PostgresqlSchemaInspector implements SchemaInspector {
   }
 
   async getTables(): Promise<string[]> {
-    const { rows } = await this.db.connection.raw<{ rows: RawTable[] }>(SQL_QUERIES.TABLE_LIST, [
-      this.getDatabaseSchema(),
-    ]);
+    const tables = await this.db.connection
+      .withSchema('information_schema')
+      .select('table_name')
+      .from('tables')
+      .where({
+        table_schema: this.getDatabaseSchema(),
+        table_type: 'BASE TABLE',
+      })
+      .whereNotIn('table_name', ['geometry_columns', 'spatial_ref_sys']);
 
-    return rows.map((row) => row.table_name);
+    return tables.map((table) => table.table_name);
   }
 
   async getColumns(tableName: string): Promise<Column[]> {
-    const { rows } = await this.db.connection.raw<{ rows: RawColumn[] }>(SQL_QUERIES.LIST_COLUMNS, [
-      this.getDatabaseSchema(),
-      tableName,
-    ]);
+    const columns = await this.db.connection
+      .withSchema('information_schema')
+      .select(
+        'data_type',
+        'column_name',
+        'character_maximum_length',
+        'column_default',
+        'is_nullable'
+      )
+      .from('columns')
+      .where({
+        table_schema: this.getDatabaseSchema(),
+        table_name: tableName,
+      });
 
-    return rows.map((row) => {
-      const { type, args = [], ...rest } = toStrapiType(row);
-
+    return columns.map((column) => {
+      const { type, args = [], ...rest } = toStrapiType(column);
       const defaultTo =
-        row.column_default && row.column_default.includes('nextval(') ? null : row.column_default;
+        column.column_default && column.column_default.includes('nextval(')
+          ? null
+          : column.column_default;
 
       return {
         type,
         args,
         defaultTo,
-        name: row.column_name,
-        notNullable: row.is_nullable === 'NO',
+        name: column.column_name,
+        notNullable: column.is_nullable === 'NO',
         unsigned: false,
         ...rest,
       };
@@ -225,84 +138,95 @@ export default class PostgresqlSchemaInspector implements SchemaInspector {
   }
 
   async getIndexes(tableName: string): Promise<Index[]> {
-    const { rows } = await this.db.connection.raw<{ rows: RawIndex[] }>(SQL_QUERIES.INDEX_LIST, [
-      this.getDatabaseSchema(),
-      tableName,
-    ]);
+    const indexes = await this.db
+      .connection('pg_indexes')
+      .where({
+        schemaname: this.getDatabaseSchema(),
+        tablename: tableName,
+      })
+      .select('indexname', 'indexdef');
 
-    const ret: Record<RawIndex['indexrelid'], Index> = {};
+    return indexes.map((index) => ({
+      name: index.indexname,
+      columns: this.parseIndexColumns(index.indexdef),
+      type: getIndexType(index),
+    }));
+  }
 
-    for (const index of rows) {
-      if (index.column_name === 'id') {
-        continue;
-      }
-
-      if (!ret[index.indexrelid]) {
-        ret[index.indexrelid] = {
-          columns: [index.column_name],
-          name: index.index_name,
-          type: getIndexType(index),
-        };
-      } else {
-        ret[index.indexrelid].columns.push(index.column_name);
-      }
-    }
-
-    return Object.values(ret);
+  parseIndexColumns(indexDef: string): string[] {
+    // Use regex or another parsing technique to extract column names from index definition
+    const matches = indexDef.match(/\((.*?)\)/);
+    return matches ? matches[1].split(',').map((col) => col.trim()) : [];
   }
 
   async getForeignKeys(tableName: string): Promise<ForeignKey[]> {
-    const { rows } = await this.db.connection.raw<{ rows: RawForeignKey[] }>(
-      SQL_QUERIES.FOREIGN_KEY_LIST,
-      [this.getDatabaseSchema(), tableName]
+    const constraints = await this.db.connection
+      .withSchema('information_schema')
+      .select('constraint_name')
+      .from('table_constraints')
+      .where({
+        table_schema: this.getDatabaseSchema(),
+        table_name: tableName,
+        constraint_type: 'FOREIGN KEY',
+      });
+
+    const foreignKeys = await Promise.all(
+      constraints.map(async (constraint) => {
+        const columns = await this.getForeignKeyColumns(constraint.constraint_name, tableName);
+        const references = await this.getForeignKeyReferences(constraint.constraint_name);
+
+        return {
+          name: constraint.constraint_name,
+          columns,
+          referencedTable: references.referencedTable,
+          referencedColumns: references.referencedColumns,
+          onUpdate: references.onUpdate,
+          onDelete: references.onDelete,
+        };
+      })
     );
 
-    const ret: Record<RawForeignKey['constraint_name'], ForeignKey> = {};
+    return foreignKeys;
+  }
 
-    for (const fk of rows) {
-      ret[fk.constraint_name] = {
-        name: fk.constraint_name,
-        columns: [],
-        referencedColumns: [],
-        referencedTable: null,
-        onUpdate: null,
-        onDelete: null,
-      } as unknown as ForeignKey;
-    }
+  async getForeignKeyColumns(constraintName: string, tableName: string): Promise<string[]> {
+    const result = await this.db.connection
+      .withSchema('information_schema')
+      .select('column_name')
+      .from('key_column_usage')
+      .where({
+        constraint_name: constraintName,
+        table_schema: this.getDatabaseSchema(),
+        table_name: tableName,
+      });
 
-    const constraintNames = Object.keys(ret);
-    const dbSchema = this.getDatabaseSchema();
-    if (constraintNames.length > 0) {
-      const { rows: fkReferences } = await this.db.connection.raw(
-        SQL_QUERIES.FOREIGN_KEY_REFERENCES,
-        [[constraintNames], dbSchema, tableName]
-      );
+    return result.map((row) => row.column_name);
+  }
 
-      for (const fkReference of fkReferences) {
-        ret[fkReference.constraint_name].columns.push(fkReference.column_name);
+  async getForeignKeyReferences(constraintName: string) {
+    const [references] = await this.db.connection
+      .withSchema('information_schema')
+      .select('update_rule as onUpdate', 'delete_rule as onDelete', 'unique_constraint_name')
+      .from('referential_constraints')
+      .where({
+        constraint_name: constraintName,
+        constraint_schema: this.getDatabaseSchema(),
+      });
 
-        const { rows: fkReferencesConstraint } = await this.db.connection.raw(
-          SQL_QUERIES.FOREIGN_KEY_REFERENCES_CONSTRAIN,
-          [[fkReference.constraint_name], dbSchema]
-        );
+    const refColumns = await this.db.connection
+      .withSchema('information_schema')
+      .select('table_name as referencedTable', 'column_name as referencedColumn')
+      .from('key_column_usage')
+      .where({
+        constraint_name: references.unique_constraint_name,
+        table_schema: this.getDatabaseSchema(),
+      });
 
-        for (const fkReferenceC of fkReferencesConstraint) {
-          const { rows: fkReferencesConstraintReferece } = await this.db.connection.raw(
-            SQL_QUERIES.FOREIGN_KEY_REFERENCES_CONSTRAIN_RFERENCE,
-            [fkReferenceC.unique_constraint_name, dbSchema]
-          );
-          for (const fkReferenceConst of fkReferencesConstraintReferece) {
-            ret[fkReference.constraint_name].referencedTable = fkReferenceConst.foreign_table;
-            ret[fkReference.constraint_name].referencedColumns.push(
-              fkReferenceConst.fk_column_name
-            );
-          }
-          ret[fkReference.constraint_name].onUpdate = fkReferenceC.on_update.toUpperCase();
-          ret[fkReference.constraint_name].onDelete = fkReferenceC.on_delete.toUpperCase();
-        }
-      }
-    }
-
-    return Object.values(ret);
+    return {
+      onUpdate: references.onUpdate,
+      onDelete: references.onDelete,
+      referencedTable: refColumns[0]?.referencedTable || null,
+      referencedColumns: refColumns.map((col) => col.referencedColumn),
+    };
   }
 }

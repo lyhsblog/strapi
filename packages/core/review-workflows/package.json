@@ -67,7 +67,7 @@
   "devDependencies": {
     "@strapi/admin": "workspace:*",
     "@strapi/content-manager": "workspace:*",
-    "@strapi/pack-up": "5.0.0",
+    "@strapi/pack-up": "5.1.0-beta.0",
     "@strapi/types": "workspace:*",
     "@strapi/utils": "workspace:*",
     "@testing-library/react": "15.0.7",

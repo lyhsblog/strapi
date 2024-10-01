@@ -75,7 +75,7 @@
   "devDependencies": {
     "@apidevtools/swagger-parser": "^10.1.0",
     "@strapi/admin-test-utils": "workspace:*",
-    "@strapi/pack-up": "5.0.0",
+    "@strapi/pack-up": "5.1.0-beta.0",
     "@strapi/sdk-plugin": "^5.0.0",
     "@strapi/strapi": "workspace:*",
     "@strapi/types": "workspace:*",

@@ -46,7 +46,7 @@
     "@strapi/utils": "workspace:*"
   },
   "devDependencies": {
-    "@strapi/pack-up": "5.0.0",
+    "@strapi/pack-up": "5.1.0-beta.0",
     "eslint-config-custom": "workspace:*",
     "tsconfig": "workspace:*"
   },

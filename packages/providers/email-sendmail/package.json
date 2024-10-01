@@ -45,7 +45,7 @@
     "sendmail": "^1.6.1"
   },
   "devDependencies": {
-    "@strapi/pack-up": "5.0.0",
+    "@strapi/pack-up": "5.1.0-beta.0",
     "@types/sendmail": "1.4.4",
     "eslint-config-custom": "workspace:*",
     "tsconfig": "workspace:*"
